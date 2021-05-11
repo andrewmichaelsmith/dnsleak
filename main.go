@@ -6,10 +6,6 @@ import (
 	"strconv"
 )
 
-var records = map[string]string{
-	"test.service.": "192.168.0.2",
-}
-
 func parseQuery(m *dns.Msg) {
 
 	for _, q := range m.Question {
@@ -23,6 +19,7 @@ func handleDnsRequest(w dns.ResponseWriter, r *dns.Msg) {
 	m.SetReply(r)
 	m.Compress = false
 
+	log.Printf("Query from %s\n", w.RemoteAddr())
 	switch r.Opcode {
 	case dns.OpcodeQuery:
 		parseQuery(m)
