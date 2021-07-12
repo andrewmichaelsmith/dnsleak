@@ -32,10 +32,24 @@ type Config struct {
 	}
 }
 
-func parseQuery(m *dns.Msg) {
+var ctx context.Context
+var client *elastic.Client
+
+func recordQuery(m *dns.Msg, sourceIP string) {
 
 	for _, q := range m.Question {
-		log.Printf("Query for %s %d %d\n", q.Name, q.Qclass, q.Qtype)
+		log.Printf("Query from %s for %s %d %d\n", sourceIP, q.Name, q.Qclass, q.Qtype)
+		record := Record{date: time.Now(), query: q.Name, sourceIP: sourceIP}
+		_, err := client.Index().
+			Index("dnsleak").
+			Type("log").
+			BodyJson(record).
+			Do(ctx)
+		if err != nil {
+			// Handle error
+			panic(err)
+		}
+
 	}
 
 }
@@ -45,10 +59,9 @@ func handleDnsRequest(w dns.ResponseWriter, r *dns.Msg) {
 	m.SetReply(r)
 	m.Compress = false
 
-	log.Printf("Query from %s\n", w.RemoteAddr())
 	switch r.Opcode {
 	case dns.OpcodeQuery:
-		parseQuery(m)
+		recordQuery(m, w.RemoteAddr().String())
 	}
 
 	w.WriteMsg(m)
@@ -67,14 +80,14 @@ func main() {
 		Host:   net.JoinHostPort(cfg.Elastic.Host, cfg.Elastic.Port),
 	}
 
-	ctx := context.Background()
+	ctx = context.Background()
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: !cfg.Elastic.VerifyCerts},
 	}
 	httpClient := &http.Client{Transport: tr}
 
-	client, err := elastic.NewClient(
+	client, err = elastic.NewClient(
 		elastic.SetHttpClient(httpClient),
 		elastic.SetURL(url.String()),
 		elastic.SetSniff(false),
@@ -84,18 +97,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to es: %s\n ", err.Error())
 	}
-
-	record := Record{date: time.Now(), query: "", sourceIP: ""}
-	_, err = client.Index().
-		Index("dnsleak").
-		Type("log").
-		BodyJson(record).
-		Do(ctx)
-	if err != nil {
-		// Handle error
-		panic(err)
-	}
-
 	//client.index
 	// attach request handler func
 	dns.HandleFunc(".", handleDnsRequest)
