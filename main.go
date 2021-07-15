@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
@@ -17,9 +18,10 @@ import (
 
 // Tweet is a structure used for serializing/deserializing data in Elasticsearch.
 type Record struct {
-	date     time.Time `json:"date"`
-	query    string    `json:"query"`
-	sourceIP string    `json:"source-ip"`
+	Date       time.Time `json:"date"`
+	Query      string    `json:"query"`
+	SourceIP   string    `json:"source-ip"`
+	SourcePort int       `json:"source-port"`
 }
 
 type Config struct {
@@ -35,14 +37,14 @@ type Config struct {
 var ctx context.Context
 var client *elastic.Client
 
-func recordQuery(m *dns.Msg, sourceIP string) {
+func recordQuery(m *dns.Msg, sourceIP string, sourcePort int) {
 
 	for _, q := range m.Question {
 		log.Printf("Query from %s for %s %d %d\n", sourceIP, q.Name, q.Qclass, q.Qtype)
-		record := Record{date: time.Now(), query: q.Name, sourceIP: sourceIP}
+		record := Record{Date: time.Now(), Query: q.Name, SourceIP: sourceIP, SourcePort: sourcePort}
 		_, err := client.Index().
 			Index("dnsleak").
-			Type("log").
+			Type("event").
 			BodyJson(record).
 			Do(ctx)
 		if err != nil {
@@ -61,7 +63,13 @@ func handleDnsRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 	switch r.Opcode {
 	case dns.OpcodeQuery:
-		recordQuery(m, w.RemoteAddr().String())
+		remoteAddr := strings.Split(w.RemoteAddr().String(), ":")
+
+		port, err := strconv.Atoi(remoteAddr[1])
+		if err != nil {
+			log.Fatalf("Failed to connect to es: %s\n ", err.Error())
+		}
+		recordQuery(m, remoteAddr[0], port)
 	}
 
 	w.WriteMsg(m)
